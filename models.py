@@ -66,5 +66,5 @@ class AuditLog(Base):
     document_id: Mapped[str | None] = mapped_column(String, nullable=True, index=True)
     outcome: Mapped[str] = mapped_column(String)  # allowed | denied
     detail: Mapped[str] = mapped_column(Text, default="")
-    prev_hash: Mapped[str] = mapped_column(String)
+    prev_hash: Mapped[str] = mapped_column(String, unique=True)
     hash: Mapped[str] = mapped_column(String)

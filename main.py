@@ -1,8 +1,8 @@
-from datetime import datetime, timezone
-
+from datetime import datetime, timezone, timedelta
+from sqlalchemy import select, func
+import audit
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
 import documents
 import models
@@ -22,7 +22,33 @@ class LoginIn(BaseModel):
 @app.get("/")
 def home():
     return {"status": "TrustVault is running"}
+MAX_FAILS = 5
+WINDOW = timedelta(minutes=15)
 
+
+@app.post("/auth/login")
+def login(body: LoginIn, db: DbSession = Depends(get_db)):
+    email = body.email.lower()[:200]
+    marker = f"email={email}"
+    since = datetime.now(timezone.utc) - WINDOW
+    fails = db.scalar(
+        select(func.count()).select_from(models.AuditLog).where(
+            models.AuditLog.action == "login",
+            models.AuditLog.outcome == "denied",
+            models.AuditLog.detail == marker,
+            models.AuditLog.ts >= since,
+        )
+    )
+    if fails >= MAX_FAILS:
+        audit.log(db, None, "login", None, "denied", marker)
+        raise HTTPException(429, "Too many failed attempts. Try again later.")
+
+    user = db.scalar(select(models.User).where(models.User.email == email))
+    if user is None or not user.is_active or not verify_password(user.password_hash, body.password):
+        audit.log(db, user.id if user else None, "login", None, "denied", marker)
+        raise HTTPException(401, "Invalid email or password")
+    audit.log(db, user.id, "login", None, "allowed", marker)
+    return {"token": create_session(db, user), "role": user.role}
 
 @app.post("/auth/login")
 def login(body: LoginIn, db: DbSession = Depends(get_db)):
