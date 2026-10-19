@@ -19,7 +19,7 @@ from permissions import get_document_or_404
 
 router = APIRouter(prefix="/documents", tags=["documents"])
 
-UPLOAD_DIR = Path(__file__).parent / "uploads"
+UPLOAD_DIR = Path(os.getenv("UPLOAD_DIR", str(Path(__file__).parent / "uploads")))
 MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 
 # type -> (content type, allowed extensions)
@@ -140,7 +140,7 @@ def list_documents(
 @router.get("/{doc_id}/download")
 def download(doc_id: str, user: models.User = Depends(get_current_user),
              db: DbSession = Depends(get_db)):
-    doc = get_document_or_404(db, user, doc_id, "read")   # <- THE authorisation decision
+    doc = get_document_or_404(db, user, doc_id, "read", audit_action="download")   # <- THE authorisation decision   # <- THE authorisation decision
     path = UPLOAD_DIR / doc.stored_name                    # name comes from the DB only
     if not path.is_file():
         audit.log(db, user.id, "download", doc.id, "denied", "file missing on disk")

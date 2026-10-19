@@ -33,10 +33,12 @@ def can(db: DbSession, user: models.User, doc: models.Document, action: str) -> 
     return any(LEVEL[g.level] >= LEVEL[action] for g in grants)
 
 
-def get_document_or_404(db: DbSession, user: models.User, doc_id: str, action: str):
+def get_document_or_404(db: DbSession, user: models.User, doc_id: str,
+                        action: str, audit_action: str | None = None):
     doc = db.get(models.Document, doc_id)
     if doc is None or not can(db, user, doc, action):
-        audit.log(db, user.id, action, doc_id, "denied")
+        audit.log(db, user.id, audit_action or action, doc_id, "denied")
         # Same answer whether it doesn't exist or you aren't allowed
         raise HTTPException(status_code=404, detail="Not found")
     return doc
+   
