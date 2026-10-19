@@ -21,4 +21,16 @@ def test_account_locks_after_repeated_failures(client):
         bad(client)
     r = client.post("/auth/login", json={"email": "owner@t.test", "password": "Owner-pass-1"})
     assert r.status_code == 429
-    
+def test_unknown_email_still_runs_the_password_hash(client, monkeypatch):
+    import main
+    calls = []
+    real = main.verify_password
+
+    def spy(stored_hash, password):
+        calls.append(1)
+        return real(stored_hash, password)
+
+    monkeypatch.setattr(main, "verify_password", spy)
+    r = client.post("/auth/login", json={"email": "nobody@t.test", "password": "x"})
+    assert r.status_code == 401
+    assert calls == [1]   # the slow check ran even though the user does not exist    

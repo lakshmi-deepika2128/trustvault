@@ -11,6 +11,7 @@ import models
 from database import get_db
 
 ph = PasswordHasher()
+DUMMY_HASH = ph.hash("not-a-real-password")
 bearer = HTTPBearer(auto_error=False)
 SESSION_HOURS = 8
 

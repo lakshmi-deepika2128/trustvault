@@ -100,10 +100,11 @@ Status: CLOSED (defended and tested), PARTIAL, or ACCEPTED (known weakness).
 - Status: ACCEPTED. I chose protecting passwords over availability.
 
 **D3. Telling whether an email exists**
-- Login returns the same message for a wrong email and a wrong password. But a
-  nonexistent email skips the password hash, so it answers faster. Response time
-  can leak whether an email exists.
-- Status: OPEN. Fix is to hash a dummy password when the user is not found.
+- Login returns the same message for a wrong email and a wrong password, and
+  always runs the argon2 check (against a dummy hash if the user does not exist),
+  so response time does not reveal which emails are registered.
+- Test: test_unknown_email_still_runs_the_password_hash
+- Status: CLOSED (checked by a test that the hash runs, not by measuring time)
 
 **D4. A user making themselves admin**
 - There is no endpoint that sets a role, and role is never read from the request.

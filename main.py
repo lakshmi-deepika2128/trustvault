@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session as DbSession
 import documents
 import models
 from auth import (verify_password, create_session, get_current_user,
-                  bearer, _hash_token)
+                  bearer, _hash_token, DUMMY_HASH)
 from database import engine, Base, get_db
 
 Base.metadata.create_all(engine)
@@ -44,7 +44,10 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
         raise HTTPException(429, "Too many failed attempts. Try again later.")
 
     user = db.scalar(select(models.User).where(models.User.email == email))
-    if user is None or not user.is_active or not verify_password(user.password_hash, body.password):
+        # Always run the slow hash, even for unknown emails, so timing reveals nothing
+    stored = user.password_hash if user else DUMMY_HASH
+    password_ok = verify_password(stored, body.password)
+    if user is None or not user.is_active or not password_ok:
         audit.log(db, user.id if user else None, "login", None, "denied", marker)
         raise HTTPException(401, "Invalid email or password")
     audit.log(db, user.id, "login", None, "allowed", marker)
@@ -52,9 +55,29 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
 
 @app.post("/auth/login")
 def login(body: LoginIn, db: DbSession = Depends(get_db)):
-    user = db.scalar(select(models.User).where(models.User.email == body.email.lower()))
-    if user is None or not user.is_active or not verify_password(user.password_hash, body.password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
+    email = body.email.lower()[:200]
+    marker = f"email={email}"
+    since = datetime.now(timezone.utc) - WINDOW
+    fails = db.scalar(
+        select(func.count()).select_from(models.AuditLog).where(
+            models.AuditLog.action == "login",
+            models.AuditLog.outcome == "denied",
+            models.AuditLog.detail == marker,
+            models.AuditLog.ts >= since,
+        )
+    )
+    if fails >= MAX_FAILS:
+        audit.log(db, None, "login", None, "denied", marker)
+        raise HTTPException(429, "Too many failed attempts. Try again later.")
+
+    user = db.scalar(select(models.User).where(models.User.email == email))
+    # Always run the slow hash, even for unknown emails, so timing reveals nothing
+    stored = user.password_hash if user else DUMMY_HASH
+    password_ok = verify_password(stored, body.password)
+    if user is None or not user.is_active or not password_ok:
+        audit.log(db, user.id if user else None, "login", None, "denied", marker)
+        raise HTTPException(401, "Invalid email or password")
+    audit.log(db, user.id, "login", None, "allowed", marker)
     return {"token": create_session(db, user), "role": user.role}
 
 
