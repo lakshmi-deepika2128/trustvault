@@ -1,3 +1,5 @@
+from datetime import datetime, timezone
+
 from fastapi import HTTPException
 from sqlalchemy import select
 from sqlalchemy.orm import Session as DbSession
@@ -30,7 +32,17 @@ def can(db: DbSession, user: models.User, doc: models.Document, action: str) -> 
             models.Grant.revoked_at.is_(None),
         )
     )
-    return any(LEVEL[g.level] >= LEVEL[action] for g in grants)
+    now = datetime.now(timezone.utc)
+    for g in grants:
+        expiry = g.expires_at
+        if expiry is not None:
+            if expiry.tzinfo is None:
+                expiry = expiry.replace(tzinfo=timezone.utc)
+            if expiry <= now:
+                continue          # an expired grant counts as no grant
+        if LEVEL[g.level] >= LEVEL[action]:
+            return True
+    return False
 
 
 def get_document_or_404(db: DbSession, user: models.User, doc_id: str,
@@ -41,4 +53,3 @@ def get_document_or_404(db: DbSession, user: models.User, doc_id: str,
         # Same answer whether it doesn't exist or you aren't allowed
         raise HTTPException(status_code=404, detail="Not found")
     return doc
-   

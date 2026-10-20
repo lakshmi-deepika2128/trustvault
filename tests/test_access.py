@@ -145,6 +145,7 @@ def test_audit_chain_detects_tampering(client):
     with SessionLocal() as db:
         assert audit.verify_chain(db) == (True, None)
         first = db.scalars(select(models.AuditLog).order_by(models.AuditLog.id)).first()
+        assert first is not None
         first.detail = "edited by an attacker"
         db.commit()
         ok, broken_id = audit.verify_chain(db)
@@ -174,3 +175,10 @@ def test_path_traversal_in_filename_is_neutralised(client):
     docs = client.get("/documents", headers=h).json()
     assert docs[0]["name"] == "passwd.txt"
     assert client.get(f"/documents/{doc}/download", headers=h).status_code == 200
+
+
+def test_oversized_upload_is_rejected(client):
+    h = login(client, "owner@t.test")
+    big = b"a" * (5 * 1024 * 1024 + 10)
+    r = client.post("/documents", files={"file": ("big.txt", big, "text/plain")}, headers=h)
+    assert r.status_code == 413

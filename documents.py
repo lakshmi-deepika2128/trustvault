@@ -1,14 +1,15 @@
+import hashlib
 import os
 import re
 import uuid
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
-from sqlalchemy import or_, select, func
+from pydantic import BaseModel, Field
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session as DbSession
 
 import audit
@@ -81,10 +82,9 @@ async def upload(
         raise HTTPException(415, "Allowed: PDF, PNG, JPG, TXT (content must match extension)")
 
     stored_name = uuid.uuid4().hex  # random, never derived from user input
-    UPLOAD_DIR.mkdir(exist_ok=True)
+    UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
     (UPLOAD_DIR / stored_name).write_bytes(data)
 
-    import hashlib
     doc = models.Document(
         name=name, category=clean(category, 50), owner_id=user.id,
         stored_name=stored_name, content_type=KINDS[kind][0],
@@ -107,8 +107,11 @@ def list_documents(
     user: models.User = Depends(get_current_user),
     db: DbSession = Depends(get_db),
 ):
+    now = datetime.now(timezone.utc)
     granted = select(models.Grant.document_id).where(
-        models.Grant.user_id == user.id, models.Grant.revoked_at.is_(None)
+        models.Grant.user_id == user.id,
+        models.Grant.revoked_at.is_(None),
+        or_(models.Grant.expires_at.is_(None), models.Grant.expires_at > now),
     )
     q = (
         select(models.Document, models.User.email)
@@ -140,8 +143,9 @@ def list_documents(
 @router.get("/{doc_id}/download")
 def download(doc_id: str, user: models.User = Depends(get_current_user),
              db: DbSession = Depends(get_db)):
-    doc = get_document_or_404(db, user, doc_id, "read", audit_action="download")   # <- THE authorisation decision   # <- THE authorisation decision
-    path = UPLOAD_DIR / doc.stored_name                    # name comes from the DB only
+    # THE authorisation decision for downloads
+    doc = get_document_or_404(db, user, doc_id, "read", audit_action="download")
+    path = UPLOAD_DIR / doc.stored_name      # the name comes from the database only
     if not path.is_file():
         audit.log(db, user.id, "download", doc.id, "denied", "file missing on disk")
         raise HTTPException(404, "Not found")
@@ -187,6 +191,7 @@ def delete(doc_id: str, user: models.User = Depends(get_current_user),
 class GrantIn(BaseModel):
     email: str
     level: Literal["read", "edit"]
+    hours: int | None = Field(default=None, ge=1, le=24 * 90)   # None = until revoked
 
 
 @router.post("/{doc_id}/grants", status_code=201)
@@ -204,10 +209,13 @@ def grant(doc_id: str, body: GrantIn, user: models.User = Depends(get_current_us
             models.Grant.document_id == doc.id, models.Grant.user_id == target.id,
             models.Grant.revoked_at.is_(None))):
         old.revoked_at = now  # replace, never stack grants
-    db.add(models.Grant(document_id=doc.id, user_id=target.id,
-                        level=body.level, granted_by=user.id))
+
+    expires = now + timedelta(hours=body.hours) if body.hours else None
+    db.add(models.Grant(document_id=doc.id, user_id=target.id, level=body.level,
+                        granted_by=user.id, expires_at=expires))
     db.commit()
-    audit.log(db, user.id, "share", doc.id, "allowed", f"{target.email}:{body.level}")
+    audit.log(db, user.id, "share", doc.id, "allowed",
+              f"{target.email}:{body.level}:{'until ' + expires.isoformat() if expires else 'no expiry'}")
     return {"ok": True}
 
 
@@ -220,7 +228,9 @@ def list_grants(doc_id: str, user: models.User = Depends(get_current_user),
         .join(models.User, models.User.id == models.Grant.user_id)
         .where(models.Grant.document_id == doc.id, models.Grant.revoked_at.is_(None))
     ).all()
-    return [{"user_id": g.user_id, "email": email, "level": g.level} for g, email in rows]
+    return [{"user_id": g.user_id, "email": email, "level": g.level,
+             "expires_at": g.expires_at.isoformat() if g.expires_at else None}
+            for g, email in rows]
 
 
 @router.delete("/{doc_id}/grants/{target_id}")

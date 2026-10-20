@@ -64,7 +64,7 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
             models.AuditLog.detail == marker,
             models.AuditLog.ts >= since,
         )
-    )
+    ) or 0
     if fails >= MAX_FAILS:
         audit.log(db, None, "login", None, "denied", marker)
         raise HTTPException(429, "Too many failed attempts. Try again later.")
@@ -84,8 +84,9 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
 def logout(creds=Depends(bearer), user=Depends(get_current_user),
            db: DbSession = Depends(get_db)):
     session = db.get(models.Session, _hash_token(creds.credentials))
-    session.revoked_at = datetime.now(timezone.utc)
-    db.commit()
+    if session is not None:
+        session.revoked_at = datetime.now(timezone.utc)
+        db.commit()
     return {"ok": True}
 
 
