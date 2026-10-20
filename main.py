@@ -1,19 +1,47 @@
+import os
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import select, func
-import audit
+
 from fastapi import FastAPI, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session as DbSession
+
+import admin
+import audit
 import documents
 import models
-from auth import (verify_password, create_session, get_current_user,
-                  bearer, _hash_token, DUMMY_HASH)
-from database import engine, Base, get_db
+from auth import (verify_password, create_session, get_current_user, bearer,
+                  _hash_token, DUMMY_HASH, hash_password)
+from database import engine, Base, get_db, SessionLocal
 
 Base.metadata.create_all(engine)
 
+DEMO_USERS = [
+    ("admin@trustvault.test", "Admin#Demo2026", "admin"),
+    ("owner@trustvault.test", "Owner#Demo2026", "owner"),
+    ("viewer@trustvault.test", "Viewer#Demo2026", "viewer"),
+]
+
+
+def seed_demo():
+    with SessionLocal() as db:
+        for email, password, role in DEMO_USERS:
+            if db.scalar(select(models.User).where(models.User.email == email)) is None:
+                db.add(models.User(email=email, password_hash=hash_password(password), role=role))
+        db.commit()
+
+
+if os.getenv("SEED_DEMO") == "1":
+    seed_demo()
+
 app = FastAPI(title="TrustVault")
 app.include_router(documents.router)
+app.include_router(admin.router)
+
+MAX_FAILS = 5
+WINDOW = timedelta(minutes=15)
+
+
 class LoginIn(BaseModel):
     email: str
     password: str
@@ -22,36 +50,7 @@ class LoginIn(BaseModel):
 @app.get("/")
 def home():
     return {"status": "TrustVault is running"}
-MAX_FAILS = 5
-WINDOW = timedelta(minutes=15)
 
-
-@app.post("/auth/login")
-def login(body: LoginIn, db: DbSession = Depends(get_db)):
-    email = body.email.lower()[:200]
-    marker = f"email={email}"
-    since = datetime.now(timezone.utc) - WINDOW
-    fails = db.scalar(
-        select(func.count()).select_from(models.AuditLog).where(
-            models.AuditLog.action == "login",
-            models.AuditLog.outcome == "denied",
-            models.AuditLog.detail == marker,
-            models.AuditLog.ts >= since,
-        )
-    )
-    if fails >= MAX_FAILS:
-        audit.log(db, None, "login", None, "denied", marker)
-        raise HTTPException(429, "Too many failed attempts. Try again later.")
-
-    user = db.scalar(select(models.User).where(models.User.email == email))
-        # Always run the slow hash, even for unknown emails, so timing reveals nothing
-    stored = user.password_hash if user else DUMMY_HASH
-    password_ok = verify_password(stored, body.password)
-    if user is None or not user.is_active or not password_ok:
-        audit.log(db, user.id if user else None, "login", None, "denied", marker)
-        raise HTTPException(401, "Invalid email or password")
-    audit.log(db, user.id, "login", None, "allowed", marker)
-    return {"token": create_session(db, user), "role": user.role}
 
 @app.post("/auth/login")
 def login(body: LoginIn, db: DbSession = Depends(get_db)):
@@ -85,7 +84,7 @@ def login(body: LoginIn, db: DbSession = Depends(get_db)):
 def logout(creds=Depends(bearer), user=Depends(get_current_user),
            db: DbSession = Depends(get_db)):
     session = db.get(models.Session, _hash_token(creds.credentials))
-    session.revoked_at= datetime.now(timezone.utc)
+    session.revoked_at = datetime.now(timezone.utc)
     db.commit()
     return {"ok": True}
 
