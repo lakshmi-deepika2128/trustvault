@@ -51,3 +51,99 @@ review the code. I did not find it myself.
 **Did instead:** made prev_hash UNIQUE in the database, added a lock inside
 the server process, and retry if the database rejects a duplicate.
 Commit: https://github.com/lakshmi-deepika2128/trustvault/commit/<hash>
+## 20 Oct 2026: Refused downloads logged under the wrong name (AUDIT TRAIL)
+**Asked:** a permission check that records refused attempts.
+**Produced:** refusals logged as "read" while successful downloads were "download".
+**Wrong:** one action had two names, so searching the audit trail for refused
+downloads would find nothing.
+**Found by:** my own test, test_refused_attempts_are_audited, failed.
+**Did instead:** added an audit_action parameter to get_document_or_404. Commit <hash>.
+
+## 21 Oct 2026: Failed logins and a forkable audit chain (AUDIT TRAIL)
+**Asked:** login with sessions, and a hash-chained audit log.
+**Produced:** a login that recorded nothing on failure and had no attempt limit,
+and a log() that could fork the chain if two requests wrote at once.
+**Wrong:** the challenge says refused attempts must be recorded, and a forked
+chain makes the verifier report tampering that never happened.
+**Found by:** the AI pointed both out when I asked it to review its own code; I
+wrote the tests and applied the fixes. I did not find them myself.
+**Did instead:** log every login result, lock an account for 15 minutes after 5
+failures, make prev_hash UNIQUE, add a lock and a retry. Commit <hash>.
+
+## 22 Oct 2026: Login timing leak (ACCESS CONTROL)
+**Asked:** safer login.
+**Produced:** a check that skipped the password hash when the email did not exist,
+so unknown emails answered faster.
+**Found by:** my test, test_unknown_email_still_runs_the_password_hash, failed
+with "assert [] == [1]". The cause was that the old line was still in main.py.
+**Did instead:** always run the hash, using a dummy hash for unknown emails.
+Commit <hash>.
+
+## 23 Oct 2026: Admin routes returned 404
+**Produced:** admin.py, but the router was not registered in main.py.
+**Found by:** 5 failing tests (404 instead of 401).
+**Did instead:** registered the router. Commit <hash>.
+
+## 24 Oct 2026: An instruction that deleted a function
+**Asked:** to add expiring grants.
+**Produced:** an instruction to replace code "to the last line" of permissions.py,
+which also deleted get_document_or_404.
+**Found by:** the red underline on the import in documents.py.
+**Did instead:** replaced the whole file with a complete version. Commit <hash>.
+
+## 25 Oct 2026: requirements.txt saved in the wrong encoding
+**Produced:** the command pip freeze > requirements.txt, which in PowerShell
+writes UTF-16.
+**Found by:** findstr printed "input file is in Unicode format".
+**Did instead:** rewrote it with Set-Content -Encoding ascii. Commit <hash>.
+
+
+
+
+
+
+<!-- ## 20 Oct 2026: Refused downloads logged under the wrong name (AUDIT TRAIL)
+**Asked:** a permission check that records refused attempts.
+**Produced:** refusals logged as "read" while successful downloads were "download".
+**Wrong:** one action had two names, so searching the audit trail for refused
+downloads would find nothing.
+**Found by:** my own test, test_refused_attempts_are_audited, failed.
+**Did instead:** added an audit_action parameter to get_document_or_404. Commit <hash>.
+
+## 20 Oct 2026: Failed logins and a forkable audit chain (AUDIT TRAIL)
+**Asked:** login with sessions, and a hash-chained audit log.
+**Produced:** a login that recorded nothing on failure and had no attempt limit,
+and a log() that could fork the chain if two requests wrote at once.
+**Wrong:** the challenge says refused attempts must be recorded, and a forked
+chain makes the verifier report tampering that never happened.
+**Found by:** the AI pointed both out when I asked it to review its own code; I
+wrote the tests and applied the fixes. I did not find them myself.
+**Did instead:** log every login result, lock an account for 15 minutes after 5
+failures, make prev_hash UNIQUE, add a lock and a retry. Commit <hash>.
+
+## 20 Oct 2026: Login timing leak (ACCESS CONTROL)
+**Asked:** safer login.
+**Produced:** a check that skipped the password hash when the email did not exist,
+so unknown emails answered faster.
+**Found by:** my test, test_unknown_email_still_runs_the_password_hash, failed
+with "assert [] == [1]". The cause was that the old line was still in main.py.
+**Did instead:** always run the hash, using a dummy hash for unknown emails.
+Commit <hash>.
+
+## 20 Oct 2026: Admin routes returned 404
+**Produced:** admin.py, but the router was not registered in main.py.
+**Found by:** 5 failing tests (404 instead of 401).
+**Did instead:** registered the router. Commit <hash>.
+
+## 20 Oct 2026: An instruction that deleted a function
+**Asked:** to add expiring grants.
+**Produced:** an instruction to replace code "to the last line" of permissions.py,
+which also deleted get_document_or_404.
+**Found by:** the red underline on the import in documents.py.
+**Did instead:** replaced the whole file with a complete version. Commit <hash>.
+
+## 20 Oct 2026: requirements.txt saved in the wrong encoding
+**Produced:** the command pip freeze > requirements.txt, which in PowerShell
+writes UTF-16.
+**Found by:** findstr printed "input file is in Unicode format".
+**Did instead:** rewrote it with Set-Content -Encoding ascii. Commit <hash>. -->
