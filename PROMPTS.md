@@ -91,7 +91,7 @@ which also deleted get_document_or_404.
 **Found by:** the red underline on the import in documents.py.
 **Did instead:** replaced the whole file with a complete version. Commit <hash>.
 
-## 25 Oct 2026: requirements.txt saved in the wrong encoding
+## 24 Oct 2026: requirements.txt saved in the wrong encoding
 **Produced:** the command pip freeze > requirements.txt, which in PowerShell
 writes UTF-16.
 **Found by:** findstr printed "input file is in Unicode format".
